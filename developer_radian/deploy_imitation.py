@@ -2,6 +2,7 @@ import os
 import numpy as np
 import torch
 import random
+import onnxruntime as ort
 
 # Fourier runtime imports
 from ischedule import run_loop, schedule
@@ -11,7 +12,7 @@ import fourier_grx.sdk.developer as fourier_grx
 import deploy_utils as dpu
 
 # Constants
-POLICY_PATH = "policy_imitation.pt"
+POLICY_PATH = "policy_imitation.onnx"
 G_DOWN = torch.Tensor([0.0, 0.0, -1.0])
 CONTROL_FREQ = 50                       # Hz
 CONTROL_PERIOD_S = 1.0 / CONTROL_FREQ   # seconds
@@ -21,7 +22,7 @@ class Controller:
         self.control_system = fourier_grx.ControlSystem()
 
         self.policy_file_path = None
-        self.policy_model = None
+        self.policy_ort = None
         self.policy_action = None
         self.obs_buf_stack = None
         
@@ -160,8 +161,7 @@ class Controller:
 
     def load_policy_model(self, policy_file_path: str, map_location='cpu'):
         self.policy_file_path = policy_file_path
-        self.policy_model = torch.jit.load(policy_file_path, map_location=map_location)
-        self.policy_model.eval()
+        self.policy_ort = ort.InferenceSession(policy_file_path)
         print(f"Policy model loaded from {policy_file_path}")
 
 
@@ -204,19 +204,21 @@ class Controller:
         input = np.concatenate([self.ref_obs_buffer.reshape(-1), prop_obs], axis=0).float()
 
         # - Get policy action
-        action = self.policy_model(input).detach()
+        output = self.policy_ort.run(None, {'obs': input})
 
-        self.policy_action = dpu.joint_pol_to_mj(action)
+        # store for next observation
+        self.policy_action = output[0]
 
-        torch_action = torch.clip(
+        output = dpu.joint_pol_to_mj(torch.from_numpy(output).squeeze(0)) # swap from IsaacLab to expected robot joint order
+
+        action = output.detach()
+        action = torch.clip(
             action,
             min=self.action_clip_min.float().unsqueeze(0),
             max=self.action_clip_max.float().unsqueeze(0),
         )
 
-        action = torch_action.numpy().squeeze(0)
-
-        self.dof_target_positions = (torch_action + self.def_dof_pos).numpy().squeeze(0)
+        self.dof_target_positions = (action + self.def_dof_pos).numpy().squeeze(0)
 
         # Set control
         """

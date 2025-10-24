@@ -8,7 +8,7 @@ Utility functions for deploying Radian models.
 """
 
 def import_reference_motions():
-    motion_dir = os.path.join(os.path.dirname(__file__), '..', 'motion_data/n1_test')
+    motion_dir = os.path.join(os.path.dirname(__file__), '..', 'n1_test')
 
     motions = {}
 
