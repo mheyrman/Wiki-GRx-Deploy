@@ -13,7 +13,7 @@ import deploy_utils as dpu
 
 # Constants
 POLICY_PATH = "policy_imitation.onnx"
-G_DOWN = torch.Tensor([0.0, 0.0, -1.0])
+G_DOWN = torch.Tensor([0.0, 0.0, -1.0]).unsqueeze(0).float()
 CONTROL_FREQ = 50                       # Hz
 CONTROL_PERIOD_S = 1.0 / CONTROL_FREQ   # seconds
 
@@ -31,49 +31,49 @@ class Controller:
         # - Robot & state variables
         self.state_dict = None
         self.num_dof = 6 + 6 + 1 + 5 + 5
-        self.joint_idx = torch.tensor([
+        self.joint_idx = np.array([
             0, 1, 2, 3, 4, 5,       # left leg
             6, 7, 8, 9, 10, 11,     # right leg
             12,                     # waist
             13, 14, 15, 16, 17,     # left arm
             18, 19, 20, 21, 22,     # right arm
-        ], dtype=torch.long)
+        ])
 
-        self.def_dof_pos = torch.tensor([
+        self.def_dof_pos = np.array([
             -0.2468, 0.0, 0.0, 0.5181, 0.0, -0.2408,    # left leg
             -0.2468, 0.0, 0.0, 0.5181, 0.0, -0.2408,    # right leg
             0.0,                                        # waist
             0.0, 0.0, 0.0, 0.0, 0.0,                    # left arm
             0.0, 0.0, 0.0, 0.0, 0.0,                    # right arm
-        ], dtype=torch.float32)
+        ])
 
-        self.action_clip_max = torch.tensor([
+        self.action_clip_max = np.array([
             2.618, 1.571, 1.571, 2.356, 0.436, 0.785,   # left leg
             2.618, 0.262, 1.571, 2.356, 0.436, 0.785,   # right leg
             2.618,                                      # waist
             2.966, 0.174, 1.834, 0.349, 1.832,          # left arm
             2.966, 0.174, 1.834, 0.349, 1.832,          # right arm
-        ], dtype=torch.float32) + torch.tensor([
+        ]) + np.array([
             0.5, 0.5, 0.5, 0.5, 0.5, 0.5,               # left leg
             0.5, 0.5, 0.5, 0.5, 0.5, 0.5,               # right leg
             0.5,                                        # waist
             0.5, 0.5, 0.5, 0.5, 0.5,                    # left arm
             0.5, 0.5, 0.5, 0.5, 0.5,                    # right arm
-        ], dtype=torch.float32)
+        ])
 
-        self.action_clip_min = torch.tensor([
+        self.action_clip_min = np.array([
             -2.618, -0.262, -1.571, -0.087, -0.436, -0.785,     # left leg
             -2.618, -1.571, -1.571, -0.087, -0.436, -0.785,     # right leg
             -2.618,                                             # waist
             -2.966, -1.396, -1.834, -1.396, -1.832,             # left arm
             -2.966, -1.396, -1.834, -1.396, -1.832,             # right arm
-        ], dtype=torch.float32) - torch.tensor([
+        ]) - np.array([
             0.5, 0.5, 0.5, 0.5, 0.5, 0.5,                       # left leg
             0.5, 0.5, 0.5, 0.5, 0.5, 0.5,                       # right leg
             0.5,                                                # waist
             0.5, 0.5, 0.5, 0.5, 0.5,                            # left arm
             0.5, 0.5, 0.5, 0.5, 0.5,                            # right arm
-        ], dtype=torch.float32)
+        ])
 
         # - Control parameters
         self.dof_control_mode = np.array([
@@ -93,18 +93,18 @@ class Controller:
             fourier_grx.JointControlMode.PD, fourier_grx.JointControlMode.PD,
         ])
         self.dof_target_kp = np.array([
-            180.0, 120.0, 90.0, 120.0, 45.0, 45.0,  # left leg
-            180.0, 120.0, 90.0, 120.0, 45.0, 45.0,  # right leg
-            90.0,                                   # waist
-            90.0, 45.0, 45.0, 45.0, 45.0,           # left arm
-            90.0, 45.0, 45.0, 45.0, 45.0,           # right arm
+            120.0, 80.0, 60.0, 80.0, 35.0, 45.0,    # left leg
+            120.0, 80.0, 60.0, 80.0, 35.0, 45.0,    # right leg
+            60.0,                                   # waist
+            45.0, 22.5, 22.5, 22.5, 22.5,           # left arm
+            45.0, 22.5, 22.5, 22.5, 22.5,           # right arm
         ])
         self.dof_target_kd = np.array([
-            10.0, 10.0, 8.0, 8.0, 2.5, 2.5,         # left leg
-            10.0, 10.0, 8.0, 8.0, 2.5, 2.5,         # right leg
-            8.0,                                    # waist
-            8.0, 2.5, 2.5, 2.5, 2.5,                # left arm
-            8.0, 2.5, 2.5, 2.5, 2.5,                # right arm
+            10.0, 8.0, 4.0, 4.0, 2.5, 2.5,          # left leg
+            10.0, 8.0, 4.0, 4.0, 2.5, 2.5,          # right leg
+            4.0,                                    # waist
+            10.0, 5.0, 5.0, 5.0, 5.0,               # left arm
+            10.0, 5.0, 5.0, 5.0, 5.0,               # right arm
         ])
         self.dof_target_positions = np.zeros(self.num_dof, dtype=np.float32)
 
@@ -115,7 +115,7 @@ class Controller:
         self.num_ref_obs = self.hist_horizon * self.num_ref_obs_per_frame
         self.num_obs = self.num_prop_obs + self.num_ref_obs
 
-        self.policy_action = torch.zeros(self.num_dof, dtype=torch.float32)
+        self.policy_action = np.zeros(self.num_dof, dtype=np.float32)
         
         # - Reference motion data
         self.ref_motions = dpu.import_reference_motions()
@@ -160,9 +160,10 @@ class Controller:
 
 
     def load_policy_model(self, policy_file_path: str, map_location='cpu'):
-        self.policy_file_path = policy_file_path
-        self.policy_ort = ort.InferenceSession(policy_file_path)
-        print(f"Policy model loaded from {policy_file_path}")
+        cur_path = os.path.dirname(os.path.abspath(__file__))
+        self.policy_file_path = os.path.join(cur_path, policy_file_path)
+        self.policy_ort = ort.InferenceSession(self.policy_file_path)
+        print(f"Policy model loaded from {self.policy_file_path}")
 
 
     def run(self):
@@ -173,12 +174,20 @@ class Controller:
         joint_measured_position = state_dict.get("joint_position", [0] * self.num_dof)
         joint_measured_velocity = state_dict.get("joint_velocity", [0] * self.num_dof)
 
+        imu_measured_quat = np.deg2rad(imu_measured_quat)
+        imu_measured_angular_velocity = np.deg2rad(imu_measured_angular_velocity)
+        joint_measured_position_deg = np.zeros(self.num_dof)
+        joint_measured_velocity = np.zeros(self.num_dof)
+        for i in range(self.num_dof):
+            joint_measured_position_deg[i] = np.deg2rad(joint_measured_position[i])
+            joint_measured_velocity[i] = np.deg2rad(joint_measured_velocity[i])
+
         # - Build proprioceptive observations
-        proj_grav = dpu.quat_rotate_inverse(torch.from_numpy(imu_measured_quat), G_DOWN)
+        proj_grav = dpu.quat_rotate_inverse(imu_measured_quat[None], G_DOWN)
         ang_vel = imu_measured_angular_velocity
-        q = torch.from_numpy(joint_measured_position) - self.def_dof_pos
+        q = joint_measured_position - self.def_dof_pos
         q = dpu.joint_mj_to_pol(q)
-        dq = torch.from_numpy(joint_measured_velocity)
+        dq = joint_measured_velocity
         dq = dpu.joint_mj_to_pol(dq)
 
         # - Build reference observations
@@ -194,31 +203,34 @@ class Controller:
 
         # - Combine observations
         prop_obs_list = []
-        prop_obs_list.append(ang_vel)
+        prop_obs_list.append(ang_vel[None])
         prop_obs_list.append(proj_grav)
-        prop_obs_list.append(q.numpy())
-        prop_obs_list.append(dq.numpy())
-        prop_obs_list.append(self.policy_action.numpy())
+        prop_obs_list.append(q)
+        prop_obs_list.append(dq)
+        prop_obs_list.append(self.policy_action[None])
 
-        prop_obs = np.concatenate(prop_obs_list, axis=0)
-        input = np.concatenate([self.ref_obs_buffer.reshape(-1), prop_obs], axis=0).float()
+        prop_obs = np.concatenate(prop_obs_list, axis=1)
+        input = np.concatenate([self.ref_obs_buffer.reshape(-1)[None], prop_obs], axis=1)
+        input = input.astype(np.float32)
 
         # - Get policy action
         output = self.policy_ort.run(None, {'obs': input})
 
         # store for next observation
-        self.policy_action = output[0]
+        self.policy_action = output[0].squeeze(0)
 
-        output = dpu.joint_pol_to_mj(torch.from_numpy(output).squeeze(0)) # swap from IsaacLab to expected robot joint order
+        output = dpu.joint_pol_to_mj(output[0]) # swap from IsaacLab to expected robot joint order
 
         action = output.detach()
-        action = torch.clip(
+        action = np.clip(
             action,
-            min=self.action_clip_min.float().unsqueeze(0),
-            max=self.action_clip_max.float().unsqueeze(0),
+            a_min=self.action_clip_min[np.newaxis, :],
+            a_max=self.action_clip_max[np.newaxis, :],
         )
 
-        self.dof_target_positions = (action + self.def_dof_pos).numpy().squeeze(0)
+        self.dof_target_positions = (action + self.def_dof_pos).squeeze(0)
+
+        self.dof_target_positions = np.rad2deg(self.dof_target_positions)
 
         # Set control
         """
@@ -234,9 +246,13 @@ class Controller:
             "pd_control_kd": self.dof_target_kd,
             "position": self.dof_target_positions,
         }
+
+        print("\033[92mInputting to robot\033[0m")
+
         # output control
         self.control_system.robot_control_loop_set_control(control_dict=control_dict)
 
+        print("\033[92mControl input sent\033[0m")
 
 if __name__ == "__main__":
     policy_file_path = POLICY_PATH
@@ -244,6 +260,6 @@ if __name__ == "__main__":
 
     controller.control_system.developer_mode(servo_on=True, control_frequency=100)
     
-    schedule(controller.run(), interval=CONTROL_PERIOD_S)
+    schedule(controller.run, interval=CONTROL_PERIOD_S)
     
     run_loop()

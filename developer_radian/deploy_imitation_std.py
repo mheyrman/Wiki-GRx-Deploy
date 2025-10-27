@@ -34,7 +34,7 @@ from ischedule import run_loop, schedule
 
 import fourier_grx.sdk.developer as fourier_grx
 
-import deploy_utils as dp
+import developer.deploy_utils as dp
 
 control_system = fourier_grx.ControlSystem()
 
