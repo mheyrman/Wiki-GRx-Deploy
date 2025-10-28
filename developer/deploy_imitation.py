@@ -107,21 +107,21 @@ class Controller:
             8.0, 2.5, 2.5, 2.5, 2.5,                # left arm
             8.0, 2.5, 2.5, 2.5, 2.5,                # right arm
         ])
-        # - test PD
-        self.dof_target_kp = np.array([
-            120.0, 80.0, 60.0, 80.0, 35.0, 45.0,    # left leg
-            120.0, 80.0, 60.0, 80.0, 35.0, 45.0,    # right leg
-            60.0,                                   # waist
-            45.0, 22.5, 22.5, 22.5, 22.5,           # left arm
-            45.0, 22.5, 22.5, 22.5, 22.5,           # right arm
-        ])
-        self.dof_target_kd = np.array([
-            10.0, 8.0, 4.0, 4.0, 2.5, 2.5,          # left leg
-            10.0, 8.0, 4.0, 4.0, 2.5, 2.5,          # right leg
-            4.0,                                    # waist
-            10.0, 5.0, 5.0, 5.0, 5.0,               # left arm
-            10.0, 5.0, 5.0, 5.0, 5.0,               # right arm
-        ])
+        # # - test PD
+        # self.dof_target_kp = np.array([
+        #     120.0, 80.0, 60.0, 80.0, 35.0, 45.0,    # left leg
+        #     120.0, 80.0, 60.0, 80.0, 35.0, 45.0,    # right leg
+        #     60.0,                                   # waist
+        #     45.0, 22.5, 22.5, 22.5, 22.5,           # left arm
+        #     45.0, 22.5, 22.5, 22.5, 22.5,           # right arm
+        # ])
+        # self.dof_target_kd = np.array([
+        #     10.0, 8.0, 4.0, 4.0, 2.5, 2.5,          # left leg
+        #     10.0, 8.0, 4.0, 4.0, 2.5, 2.5,          # right leg
+        #     4.0,                                    # waist
+        #     10.0, 5.0, 5.0, 5.0, 5.0,               # left arm
+        #     10.0, 5.0, 5.0, 5.0, 5.0,               # right arm
+        # ])
         self.dof_target_positions = np.zeros(self.num_dof, dtype=np.float32)
 
         # - Observation data
@@ -237,9 +237,8 @@ class Controller:
 
         output = dpu.joint_pol_to_mj(output[0]) # swap from IsaacLab to expected robot joint order
 
-        action = output
         action = np.clip(
-            action,
+            output,
             a_min=self.action_clip_min[np.newaxis, :],
             a_max=self.action_clip_max[np.newaxis, :],
         )
