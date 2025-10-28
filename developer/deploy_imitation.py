@@ -92,6 +92,22 @@ class Controller:
             fourier_grx.JointControlMode.PD, fourier_grx.JointControlMode.PD, fourier_grx.JointControlMode.PD,
             fourier_grx.JointControlMode.PD, fourier_grx.JointControlMode.PD,
         ])
+        # - default PD
+        self.dof_target_kp = np.array([
+            180.0, 120.0, 90.0, 120.0, 45.0, 45.0,  # left leg
+            180.0, 120.0, 90.0, 120.0, 45.0, 45.0,  # right leg
+            90.0,                                   # waist
+            90.0, 45.0, 45.0, 45.0, 45.0,           # left arm
+            90.0, 45.0, 45.0, 45.0, 45.0,           # right arm
+        ])
+        self.dof_target_kd = np.array([
+            10.0, 10.0, 8.0, 8.0, 2.5, 2.5,         # left leg
+            10.0, 10.0, 8.0, 8.0, 2.5, 2.5,         # right leg
+            8.0,                                    # waist
+            8.0, 2.5, 2.5, 2.5, 2.5,                # left arm
+            8.0, 2.5, 2.5, 2.5, 2.5,                # right arm
+        ])
+        # - test PD
         self.dof_target_kp = np.array([
             120.0, 80.0, 60.0, 80.0, 35.0, 45.0,    # left leg
             120.0, 80.0, 60.0, 80.0, 35.0, 45.0,    # right leg
@@ -183,7 +199,7 @@ class Controller:
             joint_measured_velocity[i] = np.deg2rad(joint_measured_velocity[i])
 
         # - Build proprioceptive observations
-        proj_grav = dpu.quat_rotate_inverse(imu_measured_quat[None], G_DOWN)
+        proj_grav = dpu.quat_rotate_inverse(imu_measured_quat[None], G_DOWN)[0]
         ang_vel = imu_measured_angular_velocity
         q = joint_measured_position - self.def_dof_pos
         q = dpu.joint_mj_to_pol(q)
@@ -221,7 +237,7 @@ class Controller:
 
         output = dpu.joint_pol_to_mj(output[0]) # swap from IsaacLab to expected robot joint order
 
-        action = output.detach()
+        action = output
         action = np.clip(
             action,
             a_min=self.action_clip_min[np.newaxis, :],
