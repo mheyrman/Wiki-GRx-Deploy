@@ -1,7 +1,6 @@
 import os
 import numpy as np
 import torch
-import random
 import onnxruntime as ort
 
 # Fourier runtime imports
@@ -13,7 +12,7 @@ import deploy_utils as dpu
 
 # Constants
 POLICY_PATH = "policy_imitation.onnx"
-G_DOWN = torch.Tensor([0.0, 0.0, -1.0]).unsqueeze(0).float()
+G_DOWN = np.array([0.0, 0.0, -1.0], dtype=np.float32)
 CONTROL_FREQ = 50                       # Hz
 CONTROL_PERIOD_S = 1.0 / CONTROL_FREQ   # seconds
 
@@ -40,11 +39,11 @@ class Controller:
         ])
 
         self.def_dof_pos = np.array([
-            -0.2468, 0.0, 0.0, 0.5181, 0.0, -0.2408,    # left leg
-            -0.2468, 0.0, 0.0, 0.5181, 0.0, -0.2408,    # right leg
-            0.0,                                        # waist
-            0.0, 0.0, 0.0, 0.0, 0.0,                    # left arm
-            0.0, 0.0, 0.0, 0.0, 0.0,                    # right arm
+            -0.244346, 0.0, 0.0, 0.514872, 0.0, -0.239110,      # left leg
+            -0.244346, 0.0, 0.0, 0.514872, 0.0, -0.239110,      # right leg
+            0.0,                                                # waist
+            0.0, 0.0, 0.0, 0.0, 0.0,                            # left arm
+            0.0, 0.0, 0.0, 0.0, 0.0,                            # right arm
         ])
 
         self.action_clip_max = np.array([
@@ -107,21 +106,11 @@ class Controller:
             8.0, 2.5, 2.5, 2.5, 2.5,                # left arm
             8.0, 2.5, 2.5, 2.5, 2.5,                # right arm
         ])
-        # # - test PD
-        # self.dof_target_kp = np.array([
-        #     120.0, 80.0, 60.0, 80.0, 35.0, 45.0,    # left leg
-        #     120.0, 80.0, 60.0, 80.0, 35.0, 45.0,    # right leg
-        #     60.0,                                   # waist
-        #     45.0, 22.5, 22.5, 22.5, 22.5,           # left arm
-        #     45.0, 22.5, 22.5, 22.5, 22.5,           # right arm
-        # ])
-        # self.dof_target_kd = np.array([
-        #     10.0, 8.0, 4.0, 4.0, 2.5, 2.5,          # left leg
-        #     10.0, 8.0, 4.0, 4.0, 2.5, 2.5,          # right leg
-        #     4.0,                                    # waist
-        #     10.0, 5.0, 5.0, 5.0, 5.0,               # left arm
-        #     10.0, 5.0, 5.0, 5.0, 5.0,               # right arm
-        # ])
+        # - Change before testing
+        self.gain_mult = 0.01 # test 0.01, 0.1 (falling), 0.5 (stand then fall), 0.8 (barely walk), 1.0 (normal)
+        self.dof_target_kp *= self.gain_mult
+        self.dof_target_kd *= self.gain_mult
+        
         self.dof_target_positions = np.zeros(self.num_dof, dtype=np.float32)
 
         # - Observation data
@@ -185,30 +174,25 @@ class Controller:
     def run(self):
         state_dict = self.control_system.robot_control_loop_get_state()
 
+        # - Receive and parse inputs like demo_walk.py
         imu_measured_quat = state_dict.get("imu_quat", [0, 0, 0, 1])
         imu_measured_angular_velocity = state_dict.get("imu_angular_velocity", [0, 0, 0])
         joint_measured_position = state_dict.get("joint_position", [0] * self.num_dof)
         joint_measured_velocity = state_dict.get("joint_velocity", [0] * self.num_dof)
 
-        imu_measured_quat = np.deg2rad(imu_measured_quat)
-        imu_measured_angular_velocity = np.deg2rad(imu_measured_angular_velocity)
-        joint_measured_position_deg = np.zeros(self.num_dof)
-        joint_measured_velocity = np.zeros(self.num_dof)
-        for i in range(self.num_dof):
-            joint_measured_position_deg[i] = np.deg2rad(joint_measured_position[i])
-            joint_measured_velocity[i] = np.deg2rad(joint_measured_velocity[i])
+        base_measured_quat = imu_measured_quat
+        base_measured_angular_velocity = imu_measured_angular_velocity
 
-        # - Build proprioceptive observations
-        proj_grav = dpu.quat_rotate_inverse(imu_measured_quat[None], G_DOWN)[0]
-        ang_vel = imu_measured_angular_velocity
+        # - Build proprioceptive observations (in radians)
+        proj_grav = dpu.quat_rotate_inverse(base_measured_quat, G_DOWN)
+        ang_vel = base_measured_angular_velocity
         q = joint_measured_position - self.def_dof_pos
         q = dpu.joint_mj_to_pol(q)
-        dq = joint_measured_velocity
-        dq = dpu.joint_mj_to_pol(dq)
+        dq = dpu.joint_mj_to_pol(joint_measured_velocity)
 
         # - Build reference observations
         if self.m_index >= self.m_val.shape[0]:
-            # crash out when motion ends
+            # crash when motion ends
             print("\033[93mReference motion ended. Exiting control loop.\033[0m")
             os._exit(0)
 
@@ -245,15 +229,13 @@ class Controller:
 
         self.dof_target_positions = (action + self.def_dof_pos).squeeze(0)
 
-        self.dof_target_positions = np.rad2deg(self.dof_target_positions)
-
         # Set control
         """
         Robot Control:
         - control_mode
         - pd_control_kp
         - pd_control_kd
-        - position [rad]
+        - position: radians
         """
         control_dict = {
             "control_mode": self.dof_control_mode,
@@ -263,9 +245,14 @@ class Controller:
         }
 
         print("\033[92mInputting to robot\033[0m")
+        print(self.dof_target_positions)
 
-        # output control
-        self.control_system.robot_control_loop_set_control(control_dict=control_dict)
+        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        # !!!!!! UNCOMMENT AFTER CHECKING ROBOT ACTIONS
+        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        # - output control
+
+        # self.control_system.robot_control_loop_set_control(control_dict=control_dict)
 
         print("\033[92mControl input sent\033[0m")
 
