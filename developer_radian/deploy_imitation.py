@@ -22,7 +22,10 @@ class Controller:
     def __init__(self, policy_file_path: str) -> None:
         self.control_system = fourier_grx.ControlSystem()
 
-        self.logger = RunLogger(run_name="n1_imitation")
+        self.logging = True
+
+        if self.logging:
+            self.logger = RunLogger(run_name="n1_imitation")
 
         self.policy_file_path = None
         self.policy_ort = None
@@ -115,17 +118,18 @@ class Controller:
         self.dof_target_kp *= self.gain_mult
         self.dof_target_kd *= self.gain_mult
 
-        self.logger.log_step(
-            step=datetime.now().strftime("%Y%m%d_%H%M%S"),
-            num_dog=self.num_dof,
-            joint_idx=self.joint_idx,
-            def_dof_pos=self.def_dof_pos,
-            action_clip_max=self.action_clip_max,
-            action_clip_min=self.action_clip_min,
-            dof_control_mode=self.dof_control_mode,
-            dof_target_kp=self.dof_target_kp,
-            dof_target_kd=self.dof_target_kd
-        )
+        if self.logging and hasattr(self, 'logger') and self.logger is not None:
+            self.logger.log_step(
+                step=datetime.now().strftime("%Y%m%d_%H%M%S"),
+                num_dog=self.num_dof,
+                joint_idx=self.joint_idx,
+                def_dof_pos=self.def_dof_pos,
+                action_clip_max=self.action_clip_max,
+                action_clip_min=self.action_clip_min,
+                dof_control_mode=self.dof_control_mode,
+                dof_target_kp=self.dof_target_kp,
+                dof_target_kd=self.dof_target_kd
+            )
         
         self.dof_target_positions = np.zeros(self.num_dof, dtype=np.float32)
 
@@ -248,20 +252,21 @@ class Controller:
         self.dof_target_positions = (action + self.def_dof_pos).squeeze(0)
 
         # - Log info
-        self.logger.log_step(
-            step=datetime.now().strftime("%Y%m%d_%H%M%S"),
-            imu_quat=imu_measured_quat,
-            imu_angular_velocity=imu_measured_angular_velocity,
-            joint_position=joint_measured_position,
-            joint_velocity=joint_measured_velocity,
-            joint_torque=joint_measured_torque,
-            prop_ang_vel_obs=ang_vel[None],
-            prop_proj_grav_obs=proj_grav.squeeze(0),
-            prop_q_obs=q,
-            prop_dq_obs=dq,
-            policy_action=self.policy_action,
-            action=action,
-        )
+        if self.logging and hasattr(self, 'logger') and self.logger is not None:
+            self.logger.log_step(
+                step=datetime.now().strftime("%Y%m%d_%H%M%S"),
+                imu_quat=imu_measured_quat,
+                imu_angular_velocity=imu_measured_angular_velocity,
+                joint_position=joint_measured_position,
+                joint_velocity=joint_measured_velocity,
+                joint_torque=joint_measured_torque,
+                prop_ang_vel_obs=ang_vel[None],
+                prop_proj_grav_obs=proj_grav.squeeze(0),
+                prop_q_obs=q,
+                prop_dq_obs=dq,
+                policy_action=self.policy_action,
+                action=action,
+            )
 
         # Set control
         """
