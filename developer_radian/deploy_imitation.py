@@ -1,7 +1,8 @@
 import os
 import numpy as np
-import torch
+import time
 import onnxruntime as ort
+from datetime import datetime
 
 # Fourier runtime imports
 from ischedule import run_loop, schedule
@@ -9,6 +10,7 @@ import fourier_grx.sdk.developer as fourier_grx
 
 # Helper functions
 import deploy_utils as dpu
+from deploy_logger import RunLogger
 
 # Constants
 POLICY_PATH = "policy_imitation.onnx"
@@ -19,6 +21,8 @@ CONTROL_PERIOD_S = 1.0 / CONTROL_FREQ   # seconds
 class Controller:
     def __init__(self, policy_file_path: str) -> None:
         self.control_system = fourier_grx.ControlSystem()
+
+        self.logger = RunLogger(run_name="n1_imitation")
 
         self.policy_file_path = None
         self.policy_ort = None
@@ -110,6 +114,18 @@ class Controller:
         self.gain_mult = 0.01 # test 0.01, 0.1 (falling), 0.5 (stand then fall), 0.8 (barely walk), 1.0 (normal)
         self.dof_target_kp *= self.gain_mult
         self.dof_target_kd *= self.gain_mult
+
+        self.logger.log_step(
+            step=datetime.now().strftime("%Y%m%d_%H%M%S"),
+            num_dog=self.num_dof,
+            joint_idx=self.joint_idx,
+            def_dof_pos=self.def_dof_pos,
+            action_clip_max=self.action_clip_max,
+            action_clip_min=self.action_clip_min,
+            dof_control_mode=self.dof_control_mode,
+            dof_target_kp=self.dof_target_kp,
+            dof_target_kd=self.dof_target_kd
+        )
         
         self.dof_target_positions = np.zeros(self.num_dof, dtype=np.float32)
 
@@ -169,8 +185,7 @@ class Controller:
         self.policy_file_path = os.path.join(cur_path, policy_file_path)
         self.policy_ort = ort.InferenceSession(self.policy_file_path)
         print(f"Policy model loaded from {self.policy_file_path}")
-
-
+    
     def run(self):
         state_dict = self.control_system.robot_control_loop_get_state()
 
@@ -179,6 +194,8 @@ class Controller:
         imu_measured_angular_velocity = state_dict.get("imu_angular_velocity", [0, 0, 0])
         joint_measured_position = state_dict.get("joint_position", [0] * self.num_dof)
         joint_measured_velocity = state_dict.get("joint_velocity", [0] * self.num_dof)
+        joint_measured_torque = state_dict.get("joint_kinetic", [0] * self.num_dof)
+
 
         base_measured_quat = imu_measured_quat
         base_measured_angular_velocity = imu_measured_angular_velocity
@@ -194,7 +211,8 @@ class Controller:
         if self.m_index >= self.m_val.shape[0]:
             # crash when motion ends
             print("\033[93mReference motion ended. Exiting control loop.\033[0m")
-            os._exit(0)
+            self.logger.close()
+            raise StopIteration("Reference motion has ended.")
 
         self.ref_obs_buffer = np.roll(self.ref_obs_buffer, -self.num_ref_obs_per_frame, axis=1)
         step_m_val = self.m_val[self.m_index, ...].reshape(-1)
@@ -204,7 +222,7 @@ class Controller:
         # - Combine observations
         prop_obs_list = []
         prop_obs_list.append(ang_vel[None])
-        prop_obs_list.append(proj_grav)
+        prop_obs_list.append(proj_grav.squeeze(0))
         prop_obs_list.append(q)
         prop_obs_list.append(dq)
         prop_obs_list.append(self.policy_action[None])
@@ -229,6 +247,22 @@ class Controller:
 
         self.dof_target_positions = (action + self.def_dof_pos).squeeze(0)
 
+        # - Log info
+        self.logger.log_step(
+            step=datetime.now().strftime("%Y%m%d_%H%M%S"),
+            imu_quat=imu_measured_quat,
+            imu_angular_velocity=imu_measured_angular_velocity,
+            joint_position=joint_measured_position,
+            joint_velocity=joint_measured_velocity,
+            joint_torque=joint_measured_torque,
+            prop_ang_vel_obs=ang_vel[None],
+            prop_proj_grav_obs=proj_grav.squeeze(0),
+            prop_q_obs=q,
+            prop_dq_obs=dq,
+            policy_action=self.policy_action,
+            action=action,
+        )
+
         # Set control
         """
         Robot Control:
@@ -245,14 +279,13 @@ class Controller:
         }
 
         print("\033[92mInputting to robot\033[0m")
-        print(self.dof_target_positions)
 
         # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         # !!!!!! UNCOMMENT AFTER CHECKING ROBOT ACTIONS
         # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         # - output control
 
-        # self.control_system.robot_control_loop_set_control(control_dict=control_dict)
+        self.control_system.robot_control_loop_set_control(control_dict=control_dict)
 
         print("\033[92mControl input sent\033[0m")
 
